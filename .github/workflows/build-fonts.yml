@@ -27,13 +27,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y fontforge python3-fontforge
+          sudo apt-get install -y fontforge python3-fontforge jq
           pip install --upgrade pip
+      
+      - name: Validate Python script
+        run: |
+          python -m py_compile scripts/merge_fonts.py
+          echo "Python script syntax validated"
       
       - name: Check if build is needed
         id: check_versions

@@ -19,7 +19,10 @@ def get_latest_release(repo: str) -> Dict:
     """Get the latest release information from GitHub"""
     url = f"https://api.github.com/repos/{repo}/releases/latest"
     print(f"Fetching latest release from {repo}...")
-    with urllib.request.urlopen(url) as response:
+    
+    # Add User-Agent to avoid rate limiting
+    req = urllib.request.Request(url, headers={'User-Agent': 'LXGW-JB-nerd/1.0'})
+    with urllib.request.urlopen(req) as response:
         data = json.loads(response.read().decode())
     return data
 
