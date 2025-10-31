@@ -15,13 +15,16 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Version constant for User-Agent header
+VERSION = "1.0.0"
+
 def get_latest_release(repo: str) -> Dict:
     """Get the latest release information from GitHub"""
     url = f"https://api.github.com/repos/{repo}/releases/latest"
     print(f"Fetching latest release from {repo}...")
     
     # Add User-Agent to avoid rate limiting
-    req = urllib.request.Request(url, headers={'User-Agent': 'LXGW-JB-nerd/1.0'})
+    req = urllib.request.Request(url, headers={'User-Agent': f'LXGW-JB-nerd/{VERSION}'})
     with urllib.request.urlopen(req) as response:
         data = json.loads(response.read().decode())
     return data
@@ -59,17 +62,18 @@ def merge_fonts(lxgw_font: Path, jb_font: Path, output_font: Path) -> None:
     """Merge LXGW (Chinese) and JetBrains Mono (Latin) fonts using fontforge"""
     print(f"Merging {lxgw_font.name} with {jb_font.name}...")
     
-    merge_script = f'''
+    # Create merge script using format() for clarity
+    merge_script_template = '''
 import fontforge
 import sys
 
 # Open the JetBrains Mono font as base (for Latin characters)
-base = fontforge.open("{jb_font}")
-print(f"Opened base font: {base.fontname}")
+base = fontforge.open("{base_font}")
+print("Opened base font: " + base.fontname)
 
 # Open LXGW font to copy Chinese characters
-chinese = fontforge.open("{lxgw_font}")
-print(f"Opened Chinese font: {chinese.fontname}")
+chinese = fontforge.open("{chinese_font}")
+print("Opened Chinese font: " + chinese.fontname)
 
 # Copy Chinese characters (CJK Unified Ideographs and related ranges)
 # Basic CJK: U+4E00 to U+9FFF
@@ -102,13 +106,19 @@ base.fullname = "LXGW JB Mono"
 base.fontname = "LXGWJB-Mono"
 
 # Generate the merged font
-output_path = "{output_font}"
+output_path = "{output_path}"
 base.generate(output_path)
-print(f"Generated merged font: {output_path}")
+print("Generated merged font: " + output_path)
 
 base.close()
 chinese.close()
 '''
+    
+    merge_script = merge_script_template.format(
+        base_font=jb_font,
+        chinese_font=lxgw_font,
+        output_path=output_font
+    )
     
     # Write and execute the merge script
     merge_script_path = output_font.parent / "merge_temp.py"
@@ -273,8 +283,11 @@ def main():
     
     jb_regular = None
     for font in jb_fonts:
-        if 'Regular' in font.name and 'Mono' not in font.parent.name:
-            # Get TTF version from fonts/ttf directory
+        # Select JetBrains Mono Regular from the TTF directory
+        # Note: We want the base JetBrains Mono (not variant fonts)
+        # and 'Mono' in parent name would indicate it's in a subdirectory of variants
+        if 'Regular' in font.name:
+            # Prefer TTF version from fonts/ttf directory
             if font.parent.name == 'ttf':
                 jb_regular = font
                 break

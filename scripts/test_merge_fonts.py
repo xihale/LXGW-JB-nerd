@@ -41,7 +41,9 @@ def test_script_syntax():
     print("\nTesting script syntax...")
     import py_compile
     try:
-        py_compile.compile('scripts/merge_fonts.py', doraise=True)
+        # Use relative path from script directory
+        script_path = Path(__file__).parent / 'merge_fonts.py'
+        py_compile.compile(str(script_path), doraise=True)
         print("✓ Script has valid Python syntax")
         return True
     except py_compile.PyCompileError as e:
@@ -51,7 +53,9 @@ def test_script_syntax():
 def test_function_definitions():
     """Test that all expected functions are defined"""
     print("\nTesting function definitions...")
-    sys.path.insert(0, 'scripts')
+    # Add scripts directory to path using relative import
+    scripts_dir = Path(__file__).parent
+    sys.path.insert(0, str(scripts_dir))
     try:
         import merge_fonts
         
