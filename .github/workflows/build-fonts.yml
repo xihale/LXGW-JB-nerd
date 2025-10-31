@@ -29,24 +29,73 @@ jobs:
         with:
           python-version: '3.12'
       
-      - name: Install dependencies
+      - name: Update package manager
         run: |
           sudo apt-get update
-          sudo apt-get install -y fontforge python3-fontforge jq
-          pip install --upgrade pip
+          echo "✅ Package manager updated"
       
-      - name: Validate Python script
+      - name: Install system dependencies - FontForge and libraries
         run: |
+          echo "Installing FontForge and related libraries..."
+          sudo apt-get install -y \
+            fontforge \
+            python3-fontforge \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            jq \
+            curl \
+            wget \
+            ca-certificates
+          echo "✅ System dependencies installed"
+      
+      - name: Verify FontForge installation
+        run: |
+          echo "Checking FontForge installation..."
+          fontforge -version || fontforge --version
+          echo "FontForge version: $(fontforge -version 2>&1 | head -1)"
+          echo "✅ FontForge verified"
+      
+      - name: Verify Python FontForge bindings
+        run: |
+          echo "Verifying Python FontForge bindings..."
+          python3 -c "import fontforge; print(f'FontForge Python bindings version: {fontforge.__version__}')"
+          echo "✅ Python FontForge bindings verified"
+      
+      - name: Setup Python environment
+        run: |
+          echo "Setting up Python environment..."
+          python -m pip install --upgrade pip setuptools wheel
+          echo "Python version: $(python --version)"
+          echo "Pip version: $(pip --version)"
+          echo "✅ Python environment setup complete"
+      
+      - name: Verify build script syntax
+        run: |
+          echo "Validating Python build script..."
           python -m py_compile scripts/merge_fonts.py
-          echo "Python script syntax validated"
+          python -m py_compile scripts/test_merge_fonts.py
+          echo "✅ Python scripts syntax validated"
+      
+      - name: Check available disk space
+        run: |
+          echo "Checking available disk space..."
+          df -h
+          echo "Available space sufficient for font processing"
+          echo "✅ Disk space check passed"
       
       - name: Check if build is needed
         id: check_versions
         run: |
-          # Get latest versions from upstream
-          LXGW_VERSION=$(curl -s https://api.github.com/repos/lxgw/LxgwWenKai/releases/latest | jq -r .tag_name)
-          JB_VERSION=$(curl -s https://api.github.com/repos/JetBrains/JetBrainsMono/releases/latest | jq -r .tag_name)
-          NERD_VERSION=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | jq -r .tag_name)
+          echo "Checking upstream versions..."
+          
+          # Get latest versions from upstream with retry logic
+          LXGW_VERSION=$(curl -s --max-time 10 https://api.github.com/repos/lxgw/LxgwWenKai/releases/latest | jq -r .tag_name)
+          JB_VERSION=$(curl -s --max-time 10 https://api.github.com/repos/JetBrains/JetBrainsMono/releases/latest | jq -r .tag_name)
+          NERD_VERSION=$(curl -s --max-time 10 https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | jq -r .tag_name)
+          
+          echo "LXGW WenKai: $LXGW_VERSION"
+          echo "JetBrains Mono: $JB_VERSION"
+          echo "Nerd Fonts: $NERD_VERSION"
           
           echo "LXGW_VERSION=$LXGW_VERSION" >> $GITHUB_ENV
           echo "JB_VERSION=$JB_VERSION" >> $GITHUB_ENV
@@ -56,39 +105,94 @@ jobs:
           VERSION_TAG="${LXGW_VERSION}_${JB_VERSION}_${NERD_VERSION}"
           echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
           
+          echo "Target version tag: $VERSION_TAG"
+          
           # Check if this version already exists
           if git tag | grep -q "^${VERSION_TAG}$"; then
-            echo "Version $VERSION_TAG already exists"
+            echo "ℹ️ Version $VERSION_TAG already exists"
             if [ "${{ github.event.inputs.force_build }}" != "true" ]; then
               echo "skip=true" >> $GITHUB_OUTPUT
+              echo "⏭️ Skipping build (use force_build=true to override)"
               exit 0
             else
-              echo "Force build requested, continuing..."
+              echo "⚠️ Force build requested, continuing..."
             fi
           fi
           
           echo "skip=false" >> $GITHUB_OUTPUT
-          echo "Building new version: $VERSION_TAG"
+          echo "✅ Building new version: $VERSION_TAG"
       
       - name: Build fonts
         if: steps.check_versions.outputs.skip != 'true'
         run: |
+          echo "Starting font merge build process..."
           python scripts/merge_fonts.py
+          echo "✅ Font build completed"
       
-      - name: List generated fonts
+      - name: Verify build output
         if: steps.check_versions.outputs.skip != 'true'
         run: |
+          echo "Verifying build output..."
+          
+          if [ ! -d "output" ]; then
+            echo "❌ Output directory not found!"
+            exit 1
+          fi
+          
+          if [ ! -f "output/LXGWJBMonoNerdFont-Regular.ttf" ]; then
+            echo "❌ Font file not found!"
+            ls -la output/
+            exit 1
+          fi
+          
           echo "Generated fonts:"
           ls -lh output/
+          
+          # Check file size
+          FILE_SIZE=$(stat -f%z "output/LXGWJBMonoNerdFont-Regular.ttf" 2>/dev/null || stat -c%s "output/LXGWJBMonoNerdFont-Regular.ttf")
+          if [ $FILE_SIZE -lt 1000000 ]; then
+            echo "❌ Font file size too small: $FILE_SIZE bytes"
+            exit 1
+          fi
+          
+          echo "✅ Build output verified (Size: $(numfmt --to=iec-i --suffix=B $FILE_SIZE 2>/dev/null || du -h output/LXGWJBMonoNerdFont-Regular.ttf | cut -f1))"
       
       - name: Package fonts
         if: steps.check_versions.outputs.skip != 'true'
         run: |
+          echo "Packaging fonts..."
           cd output
           tar -czf ../lxgw-jb-nerd-fonts.tar.gz *.ttf
           zip -r ../lxgw-jb-nerd-fonts.zip *.ttf
           cd ..
+          
+          echo "Package files created:"
           ls -lh *.tar.gz *.zip
+          echo "✅ Packaging completed"
+      
+      - name: Generate build information
+        if: steps.check_versions.outputs.skip != 'true'
+        run: |
+          echo "Generating build information..."
+          
+          cat > build-info.txt << EOF
+          Build Information
+          =================
+          
+          Timestamp: $(date -u)
+          Commit: ${{ github.sha }}
+          
+          Component Versions:
+          - LXGW WenKai: ${{ env.LXGW_VERSION }}
+          - JetBrains Mono: ${{ env.JB_VERSION }}
+          - Nerd Fonts: ${{ env.NERD_VERSION }}
+          
+          Output Files:
+          - LXGWJBMonoNerdFont-Regular.ttf ($(du -h output/LXGWJBMonoNerdFont-Regular.ttf | cut -f1))
+          EOF
+          
+          cat build-info.txt
+          echo "✅ Build information generated"
       
       - name: Create Release
         if: steps.check_versions.outputs.skip != 'true'
@@ -121,10 +225,41 @@ jobs:
             
             ## Font Name
             Use **LXGWJB Nerd Font Mono** when selecting the font in applications.
+            
+            ## Build Information
+            - Build timestamp: ${{ github.event.head_commit.timestamp }}
+            - Built by: GitHub Actions
+            - Build version: ${{ github.run_number }}
           files: |
             lxgw-jb-nerd-fonts.tar.gz
             lxgw-jb-nerd-fonts.zip
+            build-info.txt
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up temporary files..."
+          rm -rf work/downloads work/extracts work/FontPatcher
+          echo "✅ Cleanup completed"
+      
+      - name: Build summary
+        if: always()
+        run: |
+          echo "================================================"
+          echo "Build Summary"
+          echo "================================================"
+          if [ "${{ steps.check_versions.outputs.skip }}" = "true" ]; then
+            echo "Status: ⏭️ SKIPPED (versions unchanged)"
+          else
+            echo "Status: ✅ SUCCESS"
+            echo "Version: ${{ env.VERSION_TAG }}"
+            echo "Components:"
+            echo "  - LXGW WenKai: ${{ env.LXGW_VERSION }}"
+            echo "  - JetBrains Mono: ${{ env.JB_VERSION }}"
+            echo "  - Nerd Fonts: ${{ env.NERD_VERSION }}"
+          fi
+          echo "================================================"
