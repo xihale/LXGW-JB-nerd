@@ -1,0 +1,130 @@
+name: Build and Release Fonts
+
+on:
+  schedule:
+    # Run every Monday at 3:00 UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if versions match'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  build-fonts:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fontforge python3-fontforge jq
+          pip install --upgrade pip
+      
+      - name: Validate Python script
+        run: |
+          python -m py_compile scripts/merge_fonts.py
+          echo "Python script syntax validated"
+      
+      - name: Check if build is needed
+        id: check_versions
+        run: |
+          # Get latest versions from upstream
+          LXGW_VERSION=$(curl -s https://api.github.com/repos/lxgw/LxgwWenKai/releases/latest | jq -r .tag_name)
+          JB_VERSION=$(curl -s https://api.github.com/repos/JetBrains/JetBrainsMono/releases/latest | jq -r .tag_name)
+          NERD_VERSION=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | jq -r .tag_name)
+          
+          echo "LXGW_VERSION=$LXGW_VERSION" >> $GITHUB_ENV
+          echo "JB_VERSION=$JB_VERSION" >> $GITHUB_ENV
+          echo "NERD_VERSION=$NERD_VERSION" >> $GITHUB_ENV
+          
+          # Create version tag
+          VERSION_TAG="${LXGW_VERSION}_${JB_VERSION}_${NERD_VERSION}"
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
+          
+          # Check if this version already exists
+          if git tag | grep -q "^${VERSION_TAG}$"; then
+            echo "Version $VERSION_TAG already exists"
+            if [ "${{ github.event.inputs.force_build }}" != "true" ]; then
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "Force build requested, continuing..."
+            fi
+          fi
+          
+          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "Building new version: $VERSION_TAG"
+      
+      - name: Build fonts
+        if: steps.check_versions.outputs.skip != 'true'
+        run: |
+          python scripts/merge_fonts.py
+      
+      - name: List generated fonts
+        if: steps.check_versions.outputs.skip != 'true'
+        run: |
+          echo "Generated fonts:"
+          ls -lh output/
+      
+      - name: Package fonts
+        if: steps.check_versions.outputs.skip != 'true'
+        run: |
+          cd output
+          tar -czf ../lxgw-jb-nerd-fonts.tar.gz *.ttf
+          zip -r ../lxgw-jb-nerd-fonts.zip *.ttf
+          cd ..
+          ls -lh *.tar.gz *.zip
+      
+      - name: Create Release
+        if: steps.check_versions.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.VERSION_TAG }}
+          name: Release ${{ env.VERSION_TAG }}
+          body: |
+            # LXGW + JetBrains Mono + Nerd Font
+            
+            Merged font combining:
+            - **LXGW WenKai** (${{ env.LXGW_VERSION }}) - Chinese characters
+            - **JetBrains Mono** (${{ env.JB_VERSION }}) - Latin characters  
+            - **Nerd Fonts** (${{ env.NERD_VERSION }}) - Icon glyphs
+            
+            ## Features
+            - Chinese character support from LXGW WenKai
+            - Clean Latin characters from JetBrains Mono
+            - Complete Nerd Fonts icon set
+            - Monospace design perfect for coding
+            
+            ## Installation
+            
+            1. Download the font package (tar.gz or zip)
+            2. Extract the fonts
+            3. Install on your system:
+               - **Linux**: Copy to `~/.local/share/fonts/` or `/usr/share/fonts/`
+               - **Windows**: Right-click and select "Install"
+               - **macOS**: Double-click and select "Install Font"
+            
+            ## Font Name
+            Use **LXGWJB Nerd Font Mono** when selecting the font in applications.
+          files: |
+            lxgw-jb-nerd-fonts.tar.gz
+            lxgw-jb-nerd-fonts.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
