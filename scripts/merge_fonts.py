@@ -149,7 +149,9 @@ def patch_with_nerd_fonts(font_path: Path, patcher_dir: Path, output_dir: Path) 
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Run font-patcher with python3 to ensure fontforge module is found
     cmd = [
+        "python3",
         str(patcher_script),
         "--complete",  # Add all glyphs
         "--careful",   # Don't overwrite existing glyphs
