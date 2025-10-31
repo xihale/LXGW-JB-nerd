@@ -1,0 +1,2 @@
+# Python dependencies for font merging
+# Note: fontforge python bindings must be installed via system package manager
